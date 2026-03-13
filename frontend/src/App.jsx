@@ -1,5 +1,16 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
 import './App.css'
+
+function formatPrice(value) {
+  return `INR ${value.toLocaleString()}`
+}
+
+function originalPrice(product) {
+  const discountPercent = product.discountPercent || 20
+  const raw = product.price / (1 - discountPercent / 100)
+  return Math.round(raw)
+}
 
 function App() {
   const [profile, setProfile] = useState(null)
@@ -9,6 +20,27 @@ function App() {
   const [loading, setLoading] = useState(true)
   const [activeCategory, setActiveCategory] = useState('All')
   const [savingProfile, setSavingProfile] = useState(false)
+  const [searchTerm, setSearchTerm] = useState('')
+  const [sortBy, setSortBy] = useState('featured')
+  const [minRating, setMinRating] = useState(0)
+  const [onlyAssured, setOnlyAssured] = useState(false)
+  const [fastDeliveryOnly, setFastDeliveryOnly] = useState(false)
+  const [couponInput, setCouponInput] = useState('')
+  const [couponCode, setCouponCode] = useState('')
+  const [notice, setNotice] = useState('')
+  const noticeTimerRef = useRef(null)
+
+  function showNotice(message) {
+    setNotice(message)
+
+    if (noticeTimerRef.current) {
+      clearTimeout(noticeTimerRef.current)
+    }
+
+    noticeTimerRef.current = setTimeout(() => {
+      setNotice('')
+    }, 2200)
+  }
 
   async function fetchData() {
     setLoading(true)
@@ -38,6 +70,12 @@ function App() {
 
   useEffect(() => {
     fetchData()
+
+    return () => {
+      if (noticeTimerRef.current) {
+        clearTimeout(noticeTimerRef.current)
+      }
+    }
   }, [])
 
   const categories = useMemo(() => {
@@ -46,14 +84,100 @@ function App() {
   }, [products])
 
   const visibleProducts = useMemo(() => {
-    if (activeCategory === 'All') return products
-    return products.filter((p) => p.category === activeCategory)
-  }, [products, activeCategory])
+    let nextProducts = [...products]
+
+    if (activeCategory !== 'All') {
+      nextProducts = nextProducts.filter((product) => product.category === activeCategory)
+    }
+
+    const normalizedSearch = searchTerm.trim().toLowerCase()
+    if (normalizedSearch) {
+      nextProducts = nextProducts.filter((product) => {
+        const titleMatch = product.title.toLowerCase().includes(normalizedSearch)
+        const categoryMatch = product.category.toLowerCase().includes(normalizedSearch)
+        return titleMatch || categoryMatch
+      })
+    }
+
+    if (minRating > 0) {
+      nextProducts = nextProducts.filter((product) => product.rating >= minRating)
+    }
+
+    if (onlyAssured) {
+      nextProducts = nextProducts.filter((product) => product.assured)
+    }
+
+    if (fastDeliveryOnly) {
+      nextProducts = nextProducts.filter((product) => (product.deliveryDays || 4) <= 2)
+    }
+
+    if (sortBy === 'price-low') {
+      nextProducts.sort((a, b) => a.price - b.price)
+    }
+
+    if (sortBy === 'price-high') {
+      nextProducts.sort((a, b) => b.price - a.price)
+    }
+
+    if (sortBy === 'rating') {
+      nextProducts.sort((a, b) => b.rating - a.rating)
+    }
+
+    return nextProducts
+  }, [products, activeCategory, searchTerm, minRating, sortBy, onlyAssured, fastDeliveryOnly])
 
   const wishlistIds = useMemo(
     () => new Set(wishlist.map((item) => item.id)),
     [wishlist],
   )
+
+  const cartItemCount = useMemo(
+    () => cart.items.reduce((sum, item) => sum + item.quantity, 0),
+    [cart.items],
+  )
+
+  const bagMRP = useMemo(
+    () => cart.items.reduce((sum, item) => sum + originalPrice(item.product) * item.quantity, 0),
+    [cart.items],
+  )
+
+  const productDiscount = bagMRP - cart.total
+
+  const couponDiscount = useMemo(() => {
+    if (couponCode === 'CLOG10') {
+      return Math.min(Math.round(cart.total * 0.1), 1200)
+    }
+
+    if (couponCode === 'SAVE200' && cart.total >= 1500) {
+      return 200
+    }
+
+    return 0
+  }, [cart.total, couponCode])
+
+  const pricing = useMemo(() => {
+    const subtotal = cart.total
+    const platformFee = subtotal > 0 ? 29 : 0
+    const deliveryFee = subtotal === 0 || subtotal >= 3000 ? 0 : 99
+    const finalTotal = subtotal + deliveryFee + platformFee - couponDiscount
+
+    return {
+      subtotal,
+      platformFee,
+      deliveryFee,
+      finalTotal,
+    }
+  }, [cart.total, couponDiscount])
+
+  async function refreshCart() {
+    const cartRes = await fetch('/api/cart')
+    setCart(await cartRes.json())
+  }
+
+  async function refreshWishlist() {
+    const wishlistRes = await fetch('/api/wishlist')
+    setWishlist(await wishlistRes.json())
+  }
 
   async function addToCart(productId) {
     await fetch('/api/cart', {
@@ -61,14 +185,14 @@ function App() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ productId }),
     })
-    const cartRes = await fetch('/api/cart')
-    setCart(await cartRes.json())
+    await refreshCart()
+    showNotice('Added to cart')
   }
 
   async function removeFromCart(productId) {
     await fetch(`/api/cart/${productId}`, { method: 'DELETE' })
-    const cartRes = await fetch('/api/cart')
-    setCart(await cartRes.json())
+    await refreshCart()
+    showNotice('Item removed from cart')
   }
 
   async function updateQuantity(productId, nextQuantity) {
@@ -83,8 +207,7 @@ function App() {
       body: JSON.stringify({ quantity: nextQuantity }),
     })
 
-    const cartRes = await fetch('/api/cart')
-    setCart(await cartRes.json())
+    await refreshCart()
   }
 
   async function toggleWishlist(productId) {
@@ -98,8 +221,90 @@ function App() {
       })
     }
 
-    const wishlistRes = await fetch('/api/wishlist')
-    setWishlist(await wishlistRes.json())
+    await refreshWishlist()
+
+    if (wishlistIds.has(productId)) {
+      showNotice('Removed from wishlist')
+    } else {
+      showNotice('Saved to wishlist')
+    }
+  }
+
+  async function moveWishlistToCart(productId) {
+    await fetch('/api/cart', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ productId }),
+    })
+    await fetch(`/api/wishlist/${productId}`, { method: 'DELETE' })
+    await Promise.all([refreshCart(), refreshWishlist()])
+    showNotice('Moved from wishlist to cart')
+  }
+
+  async function clearCart() {
+    await fetch('/api/cart', { method: 'DELETE' })
+    await refreshCart()
+    setCouponCode('')
+    setCouponInput('')
+    showNotice('Cart cleared')
+  }
+
+  async function handleCheckout() {
+    if (cart.items.length === 0) return
+    await fetch('/api/cart', { method: 'DELETE' })
+    await refreshCart()
+    setCouponCode('')
+    setCouponInput('')
+    showNotice('Order placed successfully')
+  }
+
+  async function moveAllWishlistToCart() {
+    if (wishlist.length === 0) return
+
+    await Promise.all(
+      wishlist.map((item) =>
+        fetch('/api/cart', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ productId: item.id }),
+        }),
+      ),
+    )
+
+    await Promise.all(
+      wishlist.map((item) => fetch(`/api/wishlist/${item.id}`, { method: 'DELETE' })),
+    )
+
+    await Promise.all([refreshCart(), refreshWishlist()])
+    showNotice('All wishlist items moved to cart')
+  }
+
+  function applyCoupon() {
+    const normalized = couponInput.trim().toUpperCase()
+
+    if (!normalized) {
+      showNotice('Enter coupon code')
+      return
+    }
+
+    if (normalized !== 'CLOG10' && normalized !== 'SAVE200') {
+      showNotice('Invalid coupon')
+      return
+    }
+
+    if (normalized === 'SAVE200' && cart.total < 1500) {
+      showNotice('SAVE200 requires cart total above INR 1,500')
+      return
+    }
+
+    setCouponCode(normalized)
+    showNotice(`Coupon ${normalized} applied`)
+  }
+
+  function removeCoupon() {
+    setCouponCode('')
+    setCouponInput('')
+    showNotice('Coupon removed')
   }
 
   async function saveProfile(event) {
@@ -113,6 +318,7 @@ function App() {
       body: JSON.stringify(profile),
     })
     setSavingProfile(false)
+    showNotice('Profile updated')
   }
 
   if (loading) {
@@ -125,38 +331,151 @@ function App() {
 
   return (
     <main className="app-bg">
-      <header className="top-nav">
+      <header className="top-nav sticky-head">
         <p className="brand">cloground</p>
-        <nav>
-          <button type="button" className="nav-item active">MEN</button>
-          <button type="button" className="nav-item">WOMEN</button>
-          <button type="button" className="nav-item">KIDS</button>
-          <button type="button" className="nav-item">HOME</button>
-          <button type="button" className="nav-item">BEAUTY</button>
+        <input
+          className="search-global"
+          placeholder="Search for products, brands and more"
+          value={searchTerm}
+          onChange={(event) => setSearchTerm(event.target.value)}
+        />
+        <nav className="route-nav">
+          <NavLink to="/" end className={({ isActive }) => (isActive ? 'nav-item active' : 'nav-item')}>
+            Home
+          </NavLink>
+          <NavLink
+            to="/wishlist"
+            className={({ isActive }) => (isActive ? 'nav-item active' : 'nav-item')}
+          >
+            Wishlist
+          </NavLink>
+          <NavLink
+            to="/cart"
+            className={({ isActive }) => (isActive ? 'nav-item active' : 'nav-item')}
+          >
+            Cart
+          </NavLink>
         </nav>
         <div className="nav-badges">
           <span>Wishlist: {wishlist.length}</span>
-          <span>Cart: {cart.items.length}</span>
+          <span>Cart: {cartItemCount}</span>
         </div>
       </header>
 
+      {notice ? <p className="floating-notice">{notice}</p> : null}
+
+      <Routes>
+        <Route
+          path="/"
+          element={
+            <HomePage
+              profile={profile}
+              setProfile={setProfile}
+              savingProfile={savingProfile}
+              saveProfile={saveProfile}
+              categories={categories}
+              activeCategory={activeCategory}
+              setActiveCategory={setActiveCategory}
+              sortBy={sortBy}
+              setSortBy={setSortBy}
+              minRating={minRating}
+              setMinRating={setMinRating}
+              onlyAssured={onlyAssured}
+              setOnlyAssured={setOnlyAssured}
+              fastDeliveryOnly={fastDeliveryOnly}
+              setFastDeliveryOnly={setFastDeliveryOnly}
+              visibleProducts={visibleProducts}
+              addToCart={addToCart}
+              toggleWishlist={toggleWishlist}
+              wishlistIds={wishlistIds}
+            />
+          }
+        />
+        <Route
+          path="/wishlist"
+          element={
+            <WishlistPage
+              wishlist={wishlist}
+              searchTerm={searchTerm}
+              toggleWishlist={toggleWishlist}
+              moveWishlistToCart={moveWishlistToCart}
+              moveAllWishlistToCart={moveAllWishlistToCart}
+            />
+          }
+        />
+        <Route
+          path="/cart"
+          element={
+            <CartPage
+              cart={cart}
+              cartItemCount={cartItemCount}
+              updateQuantity={updateQuantity}
+              removeFromCart={removeFromCart}
+              bagMRP={bagMRP}
+              productDiscount={productDiscount}
+              couponDiscount={couponDiscount}
+              couponInput={couponInput}
+              setCouponInput={setCouponInput}
+              couponCode={couponCode}
+              applyCoupon={applyCoupon}
+              removeCoupon={removeCoupon}
+              pricing={pricing}
+              clearCart={clearCart}
+              handleCheckout={handleCheckout}
+            />
+          }
+        />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </main>
+  )
+}
+
+function HomePage({
+  profile,
+  setProfile,
+  savingProfile,
+  saveProfile,
+  categories,
+  activeCategory,
+  setActiveCategory,
+  sortBy,
+  setSortBy,
+  minRating,
+  setMinRating,
+  onlyAssured,
+  setOnlyAssured,
+  fastDeliveryOnly,
+  setFastDeliveryOnly,
+  visibleProducts,
+  addToCart,
+  toggleWishlist,
+  wishlistIds,
+}) {
+  return (
+    <>
+      <section className="offers-strip">
+        <p>MEGA FASHION DAYS: Extra 10% off with CLOG10</p>
+        <p>FREE DELIVERY above INR 3,000</p>
+        <p>NEW STYLES added every evening</p>
+      </section>
+
       <section className="campaign-wrap">
         <article className="sale-hero">
-          <p className="pill">SPRING DROP 2026</p>
-          <h1>Street-ready looks. Everyday prices. Only at cloground.</h1>
+          <p className="pill">FASHION CARNIVAL 2026</p>
+          <h1>Curated looks, fast delivery, and offer-rich shopping in one place.</h1>
           <p>
-            Explore premium trends inspired by top fashion marketplaces with your own
-            personalized cart and wishlist flow.
+            Browse by category, compare ratings, save styles to wishlist, and checkout with coupons.
           </p>
         </article>
         <article className="deals-card">
-          <p className="small-head">TODAY DEALS</p>
-          <h2>Up to 55% Off</h2>
-          <p>Best-rated styles refreshed daily at 8 PM.</p>
+          <p className="small-head">TRENDING OFFERS</p>
+          <h2>Up to 60% Off</h2>
+          <p>Grab best-selling products with assured quality tags.</p>
           <div className="deal-tags">
-            <span>FAST DELIVERY</span>
-            <span>EASY RETURN</span>
-            <span>TREND PICKS</span>
+            <span>ASSURED</span>
+            <span>2-DAY DELIVERY</span>
+            <span>TOP RATED</span>
           </div>
         </article>
       </section>
@@ -171,7 +490,7 @@ function App() {
             <input
               id="name"
               value={profile?.name || ''}
-              onChange={(e) => setProfile((prev) => ({ ...prev, name: e.target.value }))}
+              onChange={(event) => setProfile((prev) => ({ ...prev, name: event.target.value }))}
             />
 
             <label htmlFor="email">Email</label>
@@ -179,14 +498,14 @@ function App() {
               id="email"
               type="email"
               value={profile?.email || ''}
-              onChange={(e) => setProfile((prev) => ({ ...prev, email: e.target.value }))}
+              onChange={(event) => setProfile((prev) => ({ ...prev, email: event.target.value }))}
             />
 
             <label htmlFor="city">City</label>
             <input
               id="city"
               value={profile?.city || ''}
-              onChange={(e) => setProfile((prev) => ({ ...prev, city: e.target.value }))}
+              onChange={(event) => setProfile((prev) => ({ ...prev, city: event.target.value }))}
             />
 
             <button className="btn-main" type="submit" disabled={savingProfile}>
@@ -197,112 +516,258 @@ function App() {
 
         <section className="panel products-panel">
           <div className="panel-head products-head">
-            <h2>Trending Products</h2>
-            <div className="chips">
-              {categories.map((category) => (
-                <button
-                  key={category}
-                  type="button"
-                  className={activeCategory === category ? 'chip active' : 'chip'}
-                  onClick={() => setActiveCategory(category)}
-                >
-                  {category}
-                </button>
-              ))}
+            <h2>Products</h2>
+            <div className="controls-block">
+              <select value={sortBy} onChange={(event) => setSortBy(event.target.value)}>
+                <option value="featured">Sort: Featured</option>
+                <option value="price-low">Price: Low to High</option>
+                <option value="price-high">Price: High to Low</option>
+                <option value="rating">Top Rated</option>
+              </select>
+              <select
+                value={String(minRating)}
+                onChange={(event) => setMinRating(Number(event.target.value))}
+              >
+                <option value="0">All Ratings</option>
+                <option value="4">4+ Rating</option>
+                <option value="4.5">4.5+ Rating</option>
+              </select>
             </div>
           </div>
 
-          <div className="products-grid">
-            {visibleProducts.map((product) => (
-              <article className="product-card" key={product.id}>
-                <img src={product.image} alt={product.title} />
-                <div className="product-body">
-                  <p className="category">{product.category}</p>
-                  <h3>{product.title}</h3>
-                  <p className="meta">INR {product.price.toLocaleString()}</p>
-                  <p className="rating">Rating {product.rating}</p>
-                </div>
-                <div className="product-actions">
-                  <button type="button" className="btn-main" onClick={() => addToCart(product.id)}>
-                    Add to Cart
-                  </button>
-                  <button
-                    type="button"
-                    className={wishlistIds.has(product.id) ? 'btn-soft active' : 'btn-soft'}
-                    onClick={() => toggleWishlist(product.id)}
-                  >
-                    {wishlistIds.has(product.id) ? 'Wishlisted' : 'Wishlist'}
-                  </button>
-                </div>
-              </article>
+          <div className="chips">
+            {categories.map((category) => (
+              <button
+                key={category}
+                type="button"
+                className={activeCategory === category ? 'chip active' : 'chip'}
+                onClick={() => setActiveCategory(category)}
+              >
+                {category}
+              </button>
             ))}
+            <button
+              type="button"
+              className={onlyAssured ? 'chip active' : 'chip'}
+              onClick={() => setOnlyAssured((prev) => !prev)}
+            >
+              Assured
+            </button>
+            <button
+              type="button"
+              className={fastDeliveryOnly ? 'chip active' : 'chip'}
+              onClick={() => setFastDeliveryOnly((prev) => !prev)}
+            >
+              2-Day Delivery
+            </button>
           </div>
+
+          {visibleProducts.length === 0 ? (
+            <p className="empty-text products-empty">No products match this filter.</p>
+          ) : (
+            <div className="products-grid">
+              {visibleProducts.map((product) => {
+                const mrp = originalPrice(product)
+                return (
+                  <article className="product-card" key={product.id}>
+                    <img src={product.image} alt={product.title} />
+                    <div className="product-body">
+                      <p className="category">{product.category}</p>
+                      <h3>{product.title}</h3>
+                      <p className="brand-line">{product.brand || 'cloground label'}</p>
+                      <p className="meta-row">
+                        <span className="meta">{formatPrice(product.price)}</span>
+                        <span className="strike">{formatPrice(mrp)}</span>
+                        <span className="off-tag">{product.discountPercent || 20}% OFF</span>
+                      </p>
+                      <p className="rating">Rating {product.rating} | {product.deliveryDays || 4} day delivery</p>
+                    </div>
+                    <div className="product-actions">
+                      <button type="button" className="btn-main" onClick={() => addToCart(product.id)}>
+                        Add to Cart
+                      </button>
+                      <button
+                        type="button"
+                        className={wishlistIds.has(product.id) ? 'btn-soft active' : 'btn-soft'}
+                        onClick={() => toggleWishlist(product.id)}
+                      >
+                        {wishlistIds.has(product.id) ? 'Wishlisted' : 'Wishlist'}
+                      </button>
+                    </div>
+                  </article>
+                )
+              })}
+            </div>
+          )}
         </section>
-
-        <aside className="panel side-panel">
-          <section>
-            <div className="panel-head compact">
-              <h2>Cart</h2>
-              <p>{cart.items.length} items</p>
-            </div>
-            <div className="stack-list">
-              {cart.items.length === 0 ? (
-                <p className="empty-text">Your cart is empty.</p>
-              ) : (
-                cart.items.map((item) => (
-                  <article key={item.productId} className="row-card">
-                    <div>
-                      <h4>{item.product.title}</h4>
-                      <p>INR {item.product.price.toLocaleString()}</p>
-                    </div>
-                    <div className="qty-actions">
-                      <button
-                        type="button"
-                        onClick={() => updateQuantity(item.productId, item.quantity - 1)}
-                      >
-                        -
-                      </button>
-                      <span>{item.quantity}</span>
-                      <button
-                        type="button"
-                        onClick={() => updateQuantity(item.productId, item.quantity + 1)}
-                      >
-                        +
-                      </button>
-                    </div>
-                  </article>
-                ))
-              )}
-            </div>
-            <p className="total">Total INR {cart.total.toLocaleString()}</p>
-          </section>
-
-          <section>
-            <div className="panel-head compact">
-              <h2>Wishlist</h2>
-              <p>{wishlist.length} saved</p>
-            </div>
-            <div className="stack-list">
-              {wishlist.length === 0 ? (
-                <p className="empty-text">No items in wishlist.</p>
-              ) : (
-                wishlist.map((item) => (
-                  <article key={item.id} className="row-card">
-                    <div>
-                      <h4>{item.title}</h4>
-                      <p>INR {item.price.toLocaleString()}</p>
-                    </div>
-                    <button type="button" className="btn-link" onClick={() => toggleWishlist(item.id)}>
-                      Remove
-                    </button>
-                  </article>
-                ))
-              )}
-            </div>
-          </section>
-        </aside>
       </section>
-    </main>
+    </>
+  )
+}
+
+function WishlistPage({ wishlist, searchTerm, toggleWishlist, moveWishlistToCart, moveAllWishlistToCart }) {
+  const filtered = useMemo(() => {
+    const normalized = searchTerm.trim().toLowerCase()
+    if (!normalized) return wishlist
+
+    return wishlist.filter((item) => {
+      const inTitle = item.title.toLowerCase().includes(normalized)
+      const inCategory = item.category.toLowerCase().includes(normalized)
+      return inTitle || inCategory
+    })
+  }, [wishlist, searchTerm])
+
+  return (
+    <section className="route-page panel">
+      <div className="panel-head">
+        <h2>My Wishlist</h2>
+        <button type="button" className="btn-main" onClick={moveAllWishlistToCart} disabled={wishlist.length === 0}>
+          Move All To Cart
+        </button>
+      </div>
+
+      {filtered.length === 0 ? (
+        <p className="empty-text">No wishlist items found for current search.</p>
+      ) : (
+        <div className="wishlist-grid">
+          {filtered.map((item) => (
+            <article key={item.id} className="product-card">
+              <img src={item.image} alt={item.title} />
+              <div className="product-body">
+                <p className="category">{item.category}</p>
+                <h3>{item.title}</h3>
+                <p className="meta">{formatPrice(item.price)}</p>
+              </div>
+              <div className="product-actions">
+                <button type="button" className="btn-main" onClick={() => moveWishlistToCart(item.id)}>
+                  Move To Cart
+                </button>
+                <button type="button" className="btn-soft" onClick={() => toggleWishlist(item.id)}>
+                  Remove
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function CartPage({
+  cart,
+  cartItemCount,
+  updateQuantity,
+  removeFromCart,
+  bagMRP,
+  productDiscount,
+  couponDiscount,
+  couponInput,
+  setCouponInput,
+  couponCode,
+  applyCoupon,
+  removeCoupon,
+  pricing,
+  clearCart,
+  handleCheckout,
+}) {
+  return (
+    <section className="route-page cart-layout">
+      <div className="panel">
+        <div className="panel-head compact">
+          <h2>Shopping Bag</h2>
+          <p>{cartItemCount} items</p>
+        </div>
+
+        <div className="stack-list">
+          {cart.items.length === 0 ? (
+            <p className="empty-text">Your cart is empty.</p>
+          ) : (
+            cart.items.map((item) => (
+              <article key={item.productId} className="row-card cart-line">
+                <img src={item.product.image} alt={item.product.title} />
+                <div className="line-body">
+                  <h4>{item.product.title}</h4>
+                  <p>{item.product.brand || 'cloground label'}</p>
+                  <p>{formatPrice(item.product.price)}</p>
+                  <div className="qty-actions">
+                    <button
+                      type="button"
+                      onClick={() => updateQuantity(item.productId, item.quantity - 1)}
+                    >
+                      -
+                    </button>
+                    <span>{item.quantity}</span>
+                    <button
+                      type="button"
+                      onClick={() => updateQuantity(item.productId, item.quantity + 1)}
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+                <button type="button" className="btn-link" onClick={() => removeFromCart(item.productId)}>
+                  Remove
+                </button>
+              </article>
+            ))
+          )}
+        </div>
+      </div>
+
+      <aside className="panel summary-panel">
+        <h3>Coupon</h3>
+        <div className="coupon-row">
+          <input
+            value={couponInput}
+            onChange={(event) => setCouponInput(event.target.value)}
+            placeholder="Use CLOG10 or SAVE200"
+          />
+          <button type="button" className="btn-main" onClick={applyCoupon}>
+            Apply
+          </button>
+        </div>
+        {couponCode ? (
+          <p className="coupon-applied">
+            Applied: {couponCode}
+            <button type="button" className="btn-link" onClick={removeCoupon}>
+              Remove
+            </button>
+          </p>
+        ) : null}
+
+        <h3>Price Details</h3>
+        <div className="price-breakdown">
+          <p>
+            Total MRP <span>{formatPrice(bagMRP)}</span>
+          </p>
+          <p>
+            Product Discount <span>- {formatPrice(productDiscount)}</span>
+          </p>
+          <p>
+            Coupon Discount <span>- {formatPrice(couponDiscount)}</span>
+          </p>
+          <p>
+            Platform Fee <span>{formatPrice(pricing.platformFee)}</span>
+          </p>
+          <p>
+            Delivery Fee <span>{pricing.deliveryFee === 0 ? 'FREE' : formatPrice(pricing.deliveryFee)}</span>
+          </p>
+          <p className="final-total">
+            Total Amount <span>{formatPrice(pricing.finalTotal)}</span>
+          </p>
+        </div>
+
+        <div className="checkout-actions">
+          <button type="button" className="btn-soft" onClick={clearCart} disabled={cart.items.length === 0}>
+            Clear Cart
+          </button>
+          <button type="button" className="btn-main" onClick={handleCheckout} disabled={cart.items.length === 0}>
+            Place Order
+          </button>
+        </div>
+      </aside>
+    </section>
   )
 }
 

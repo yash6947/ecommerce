@@ -19,54 +19,78 @@ const products = [
   {
     id: 1,
     title: 'AeroStride Sneaker',
+    brand: 'Roadster',
     category: 'Footwear',
     price: 2899,
+    discountPercent: 35,
     rating: 4.7,
+    assured: true,
+    deliveryDays: 2,
     image:
       'https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=900&q=80',
   },
   {
     id: 2,
     title: 'Urban Utility Backpack',
+    brand: 'HRX',
     category: 'Accessories',
     price: 1999,
+    discountPercent: 30,
     rating: 4.6,
+    assured: true,
+    deliveryDays: 2,
     image:
       'https://images.unsplash.com/photo-1581605405669-fcdf81165afa?auto=format&fit=crop&w=900&q=80',
   },
   {
     id: 3,
     title: 'Pulse Smartwatch X2',
+    brand: 'Noise',
     category: 'Wearables',
     price: 5999,
+    discountPercent: 22,
     rating: 4.4,
+    assured: true,
+    deliveryDays: 3,
     image:
       'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=900&q=80',
   },
   {
     id: 4,
     title: 'Luma Overshirt',
+    brand: 'WROGN',
     category: 'Apparel',
     price: 2499,
+    discountPercent: 40,
     rating: 4.2,
+    assured: false,
+    deliveryDays: 4,
     image:
       'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?auto=format&fit=crop&w=900&q=80',
   },
   {
     id: 5,
     title: 'Noir Ceramic Mug Set',
+    brand: 'Home Centre',
     category: 'Home',
     price: 1499,
+    discountPercent: 25,
     rating: 4.5,
+    assured: true,
+    deliveryDays: 3,
     image:
       'https://images.unsplash.com/photo-1514228742587-6b1558fcca3d?auto=format&fit=crop&w=900&q=80',
   },
   {
     id: 6,
     title: 'CloudTune Earbuds',
+    brand: 'boAt',
     category: 'Audio',
     price: 3499,
+    discountPercent: 28,
     rating: 4.3,
+    assured: true,
+    deliveryDays: 2,
     image:
       'https://images.unsplash.com/photo-1606220838315-056192d5e927?auto=format&fit=crop&w=900&q=80',
   },
@@ -165,6 +189,11 @@ app.delete('/api/cart/:productId', (req, res) => {
   const productId = Number(req.params.productId);
   cart = cart.filter((item) => item.productId !== productId);
   return res.json({ message: 'removed from cart' });
+});
+
+app.delete('/api/cart', (_, res) => {
+  cart = [];
+  return res.json({ message: 'cart cleared' });
 });
 
 app.get('/api/wishlist', (_, res) => {
