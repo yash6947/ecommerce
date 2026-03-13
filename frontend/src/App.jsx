@@ -344,6 +344,12 @@ function App() {
             Home
           </NavLink>
           <NavLink
+            to="/profile"
+            className={({ isActive }) => (isActive ? 'nav-item active' : 'nav-item')}
+          >
+            Profile
+          </NavLink>
+          <NavLink
             to="/wishlist"
             className={({ isActive }) => (isActive ? 'nav-item active' : 'nav-item')}
           >
@@ -369,10 +375,6 @@ function App() {
           path="/"
           element={
             <HomePage
-              profile={profile}
-              setProfile={setProfile}
-              savingProfile={savingProfile}
-              saveProfile={saveProfile}
               categories={categories}
               activeCategory={activeCategory}
               setActiveCategory={setActiveCategory}
@@ -388,6 +390,17 @@ function App() {
               addToCart={addToCart}
               toggleWishlist={toggleWishlist}
               wishlistIds={wishlistIds}
+            />
+          }
+        />
+        <Route
+          path="/profile"
+          element={
+            <ProfilePage
+              profile={profile}
+              setProfile={setProfile}
+              savingProfile={savingProfile}
+              saveProfile={saveProfile}
             />
           }
         />
@@ -432,10 +445,6 @@ function App() {
 }
 
 function HomePage({
-  profile,
-  setProfile,
-  savingProfile,
-  saveProfile,
   categories,
   activeCategory,
   setActiveCategory,
@@ -481,39 +490,6 @@ function HomePage({
       </section>
 
       <section className="content-grid">
-        <aside className="panel profile-panel">
-          <div className="panel-head">
-            <h2>Your Profile</h2>
-          </div>
-          <form onSubmit={saveProfile}>
-            <label htmlFor="name">Name</label>
-            <input
-              id="name"
-              value={profile?.name || ''}
-              onChange={(event) => setProfile((prev) => ({ ...prev, name: event.target.value }))}
-            />
-
-            <label htmlFor="email">Email</label>
-            <input
-              id="email"
-              type="email"
-              value={profile?.email || ''}
-              onChange={(event) => setProfile((prev) => ({ ...prev, email: event.target.value }))}
-            />
-
-            <label htmlFor="city">City</label>
-            <input
-              id="city"
-              value={profile?.city || ''}
-              onChange={(event) => setProfile((prev) => ({ ...prev, city: event.target.value }))}
-            />
-
-            <button className="btn-main" type="submit" disabled={savingProfile}>
-              {savingProfile ? 'Saving...' : 'Save Profile'}
-            </button>
-          </form>
-        </aside>
-
         <section className="panel products-panel">
           <div className="panel-head products-head">
             <h2>Products</h2>
@@ -602,6 +578,55 @@ function HomePage({
         </section>
       </section>
     </>
+  )
+}
+
+function ProfilePage({ profile, setProfile, savingProfile, saveProfile }) {
+  return (
+    <section className="route-page profile-route">
+      <article className="panel profile-card">
+        <div className="panel-head">
+          <h2>Your Profile</h2>
+        </div>
+
+        <form onSubmit={saveProfile}>
+          <label htmlFor="name">Name</label>
+          <input
+            id="name"
+            value={profile?.name || ''}
+            onChange={(event) => setProfile((prev) => ({ ...prev, name: event.target.value }))}
+          />
+
+          <label htmlFor="email">Email</label>
+          <input
+            id="email"
+            type="email"
+            value={profile?.email || ''}
+            onChange={(event) => setProfile((prev) => ({ ...prev, email: event.target.value }))}
+          />
+
+          <label htmlFor="city">City</label>
+          <input
+            id="city"
+            value={profile?.city || ''}
+            onChange={(event) => setProfile((prev) => ({ ...prev, city: event.target.value }))}
+          />
+
+          <button className="btn-main" type="submit" disabled={savingProfile}>
+            {savingProfile ? 'Saving...' : 'Save Profile'}
+          </button>
+        </form>
+      </article>
+
+      <article className="panel profile-perks">
+        <h3>cloground Member Benefits</h3>
+        <ul>
+          <li>Early access to flash sale collections</li>
+          <li>Extra coupon drops every weekend</li>
+          <li>Fast support for order and returns</li>
+        </ul>
+      </article>
+    </section>
   )
 }
 
